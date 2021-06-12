@@ -1,13 +1,15 @@
+// Struct を callable にするには nightly の機能が必要 (Fn trait)
+// https://stackoverflow.com/questions/42859330/how-do-i-make-a-struct-callable
+#![feature(unboxed_closures)]
+#![feature(fn_traits)]
+
+// 構造は本質的に doubly linked list なので、ノードの格納は Rc<RefCell<...>> に
+// https://blog.ymgyt.io/entry/2019/08/17/013313
+// https://gist.github.com/matey-jack/3e19b6370c6f7036a9119b79a82098ca
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 // use std::fmt;
 
-// 構造は本質的に doubly linked list
-// https://blog.ymgyt.io/entry/2019/08/17/013313
-// https://gist.github.com/matey-jack/3e19b6370c6f7036a9119b79a82098ca
-
-// Struct を callable にするには nightly の機能が必要 (Fn trait)
-// https://stackoverflow.com/questions/42859330/how-do-i-make-a-struct-callable
 
 fn main() {
     test_numerical_diff();
@@ -20,9 +22,9 @@ fn test_forward_prop() {
     let mut g = Exp::new();
     let mut h = Square::new();
     let x = Variable::new(0.5);
-    let a = f.call(&x);
-    let b = g.call(&a);
-    let y = h.call(&b);
+    let a = f(&x);
+    let b = g(&a);
+    let y = h(&b);
     println!("y = {:?}", y.get_data());
 }
 
@@ -31,9 +33,9 @@ fn test_back_prop() {
     let mut g = Exp::new();
     let mut h = Square::new();
     let x = Variable::new(0.5);
-    let a = f.call(&x);
-    let b = g.call(&a);
-    let y = h.call(&b);
+    let a = f(&x);
+    let b = g(&a);
+    let y = h(&b);
 
     y.set_grad(1.0);
     b.set_grad(h.backward(y.get_grad()));
@@ -94,23 +96,21 @@ impl Variable {
 }
 
 struct FunctionCell {
-    forward: Box<dyn Fn(Data) -> Data>,
     input: Option<Rc<RefCell<VariableCell>>>,
     output: Option<Weak<RefCell<VariableCell>>>,
 }
 
 impl FunctionCell {
-    fn new(forward: impl Fn(Data) -> Data + 'static) -> Self {
+    fn new() -> Self {
         Self {
-            forward: Box::new(forward),
             input: None,
             output: None,
         }
     }
-    fn cons(&mut self, input: &Variable) -> Variable {
+    fn cons(&mut self, input: &Variable, forward: fn(Data) -> Data) -> Variable {
         let x = input.get_data();
         self.input = Some(input.clone_cell());
-        let y = (self.forward)(x);
+        let y = forward(x);
         Variable::new(y)
     }
 }
@@ -121,11 +121,11 @@ struct Square {
 impl Square {
     fn new() -> Self {
         Square {
-            inner: Rc::new(RefCell::new(FunctionCell::new(Square::forward))),
+            inner: Rc::new(RefCell::new(FunctionCell::new())),
         }
     }
     fn call(&mut self, input: &Variable) -> Variable {
-        self.inner.borrow_mut().cons(input)
+        self.inner.borrow_mut().cons(input, Self::forward)
     }
     fn forward(x: Data) -> Data {
         x * x
@@ -135,6 +135,18 @@ impl Square {
         2.0 * x * gy
     }
 }
+impl FnOnce<(&Variable,)> for Square {
+    type Output = Variable;
+    extern "rust-call" fn call_once(self, _args: (&Variable,)) -> Variable {
+        panic!("Square cannot be called as FnOnce")
+    }
+}
+impl FnMut<(&Variable,)> for Square {
+    // type Output = Variable
+    extern "rust-call" fn call_mut(&mut self, args: (&Variable,)) -> Variable {
+        self.call(&args.0)
+    }
+}
 
 struct Exp {
     inner: Rc<RefCell<FunctionCell>>,
@@ -142,11 +154,11 @@ struct Exp {
 impl Exp {
     fn new() -> Self {
         Exp {
-            inner: Rc::new(RefCell::new(FunctionCell::new(Exp::forward))),
+            inner: Rc::new(RefCell::new(FunctionCell::new())),
         }
     }
     fn call(&mut self, input: &Variable) -> Variable {
-        self.inner.borrow_mut().cons(input)
+        self.inner.borrow_mut().cons(input, Self::forward)
     }
     fn forward(x: Data) -> Data {
         x.exp()
@@ -156,12 +168,24 @@ impl Exp {
         x.exp() * gy
     }
 }
+impl FnOnce<(&Variable,)> for Exp {
+    type Output = Variable;
+    extern "rust-call" fn call_once(self, _args: (&Variable,)) -> Variable {
+        panic!("Exp cannot be called as FnOnce")
+    }
+}
+impl FnMut<(&Variable,)> for Exp {
+    // type Output = Variable
+    extern "rust-call" fn call_mut(&mut self, args: (&Variable,)) -> Variable {
+        self.call(&args.0)
+    }
+}
 
 fn numerical_diff(f: &mut Square, x: Variable, eps: Option<Data>) -> Data {
     let e = eps.unwrap_or(1e-4);
     let x0 = Variable::new(x.get_data() - e);
     let x1 = Variable::new(x.get_data() + e);
-    let y0 = f.call(&x0);
-    let y1 = f.call(&x1);
+    let y0 = f(&x0);
+    let y1 = f(&x1);
     (y1.get_data() - y0.get_data()) / (2.0 * e)
 }
