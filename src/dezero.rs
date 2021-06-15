@@ -183,7 +183,7 @@ pub fn exp(x: &Variable) -> Variable {
     f.call(x)
 }
 
-pub fn numerical_diff(f: &mut Square, x: Variable, eps: Option<Data>) -> Data {
+pub fn numerical_diff(f: fn(&Variable) -> Variable, x: Variable, eps: Option<Data>) -> Data {
     let e = eps.unwrap_or(arr0(1e-4));
     let x0 = Variable::new(x.get_data() - e.clone());
     let x1 = Variable::new(x.get_data() + e.clone());
