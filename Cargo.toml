@@ -9,3 +9,7 @@ edition = "2018"
 [dependencies]
 ndarray = "0.15.3"
 num-traits = "0.2.14"
+
+[lib]
+name = "dezero"
+path = "src/dezero.rs"
