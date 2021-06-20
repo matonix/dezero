@@ -165,6 +165,7 @@ pub fn square(x: &Variable) -> Variable {
     let f = Square::new();
     f.call(x)
 }
+
 pub struct Exp {
     inner: Rc<RefCell<FunctionCell>>,
 }
@@ -203,6 +204,50 @@ impl FnMut<(&Variable,)> for Exp {
 }
 pub fn exp(x: &Variable) -> Variable {
     let f = Exp::new();
+    f.call(x)
+}
+
+pub struct Add {
+    inner: Rc<RefCell<FunctionCell>>,
+}
+impl Add {
+    pub fn new() -> Self {
+        Add {
+            inner: Rc::new(RefCell::new(FunctionCell::new(Self::backward_body))),
+        }
+    }
+    pub fn call(&self, inputs: Vec<&Variable>) -> Variable {
+        self.inner
+            .borrow_mut()
+            .cons(inputs, Rc::clone(&self.inner), Self::forward_body).pop().unwrap()
+    }
+    pub fn backward(&self, gy: Data) -> Data {
+        unimplemented!()
+    }
+    fn forward_body(xs: Vec<Data>) -> Vec<Data> {
+        let x0 = &xs[0];
+        let x1 = &xs[1];
+        let y = x0 + x1;
+        vec!(y)
+    }
+    fn backward_body(x: Vec<Data>, gy: Vec<Data>) -> Vec<Data> {
+        unimplemented!()
+    }
+}
+impl FnOnce<(Vec<&Variable>,)> for Add {
+    type Output = Variable;
+    extern "rust-call" fn call_once(self, _args: (Vec<&Variable>,)) -> Variable {
+        panic!("Exp cannot be called as FnOnce")
+    }
+}
+impl FnMut<(Vec<&Variable>,)> for Add {
+    // type Output = Variable
+    extern "rust-call" fn call_mut(&mut self, args: (Vec<&Variable>,)) -> Variable {
+        self.call(args.0)
+    }
+}
+pub fn add(x: Vec<&Variable>) -> Variable {
+    let f = Add::new();
     f.call(x)
 }
 

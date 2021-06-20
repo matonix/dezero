@@ -5,6 +5,7 @@ fn main() {
     test_numerical_diff();
     test_forward_prop();
     test_back_prop();
+    test_add();
 }
 
 fn test_forward_prop() {
@@ -29,6 +30,15 @@ fn test_numerical_diff() {
     let x = Variable::new(arr0(2.0));
     let dy = numerical_diff(f, x, None);
     println!("dy = {:?}", dy.view().into_scalar());
+}
+
+fn test_add() {
+    let x0 = Variable::new(arr0(2.));
+    let x1 = Variable::new(arr0(3.));
+    let xs = vec!(&x0, &x1);
+    let f = add;
+    let ys = f(xs);
+    println!("y = {:?}", ys.get_data().view().into_scalar());
 }
 
 #[cfg(test)]
