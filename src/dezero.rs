@@ -155,15 +155,8 @@ impl FnOnce<(&Variable,)> for Square {
         panic!("Square cannot be called as FnOnce")
     }
 }
-impl FnMut<(&Variable,)> for Square {
-    // type Output = Variable
-    extern "rust-call" fn call_mut(&mut self, args: (&Variable,)) -> Variable {
-        self.call(&args.0)
-    }
-}
 pub fn square(x: &Variable) -> Variable {
-    let f = Square::new();
-    f.call(x)
+    Square::new()(x)
 }
 
 pub struct Exp {
@@ -196,15 +189,8 @@ impl FnOnce<(&Variable,)> for Exp {
         panic!("Exp cannot be called as FnOnce")
     }
 }
-impl FnMut<(&Variable,)> for Exp {
-    // type Output = Variable
-    extern "rust-call" fn call_mut(&mut self, args: (&Variable,)) -> Variable {
-        self.call(&args.0)
-    }
-}
 pub fn exp(x: &Variable) -> Variable {
-    let f = Exp::new();
-    f.call(x)
+    Exp::new()(x)
 }
 
 pub struct Add {
@@ -240,15 +226,8 @@ impl FnOnce<(Vec<&Variable>,)> for Add {
         panic!("Exp cannot be called as FnOnce")
     }
 }
-impl FnMut<(Vec<&Variable>,)> for Add {
-    // type Output = Variable
-    extern "rust-call" fn call_mut(&mut self, args: (Vec<&Variable>,)) -> Variable {
-        self.call(args.0)
-    }
-}
-pub fn add(x: Vec<&Variable>) -> Variable {
-    let f = Add::new();
-    f.call(x)
+pub fn add(x0: &Variable, x1: &Variable) -> Variable {
+    Add::new()(vec!(x0, x1))
 }
 
 pub fn numerical_diff(f: fn(&Variable) -> Variable, x: Variable, eps: Option<Data>) -> Data {

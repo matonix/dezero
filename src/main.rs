@@ -35,10 +35,8 @@ fn test_numerical_diff() {
 fn test_add() {
     let x0 = Variable::new(arr0(2.));
     let x1 = Variable::new(arr0(3.));
-    let xs = vec!(&x0, &x1);
-    let f = add;
-    let ys = f(xs);
-    println!("y = {:?}", ys.get_data().view().into_scalar());
+    let y = add(&x0, &x1);
+    println!("y = {:?}", y.get_data().view().into_scalar());
 }
 
 #[cfg(test)]
