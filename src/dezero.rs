@@ -207,8 +207,9 @@ impl Add {
             .borrow_mut()
             .cons(inputs, Rc::clone(&self.inner), Self::forward_body).pop().unwrap()
     }
-    pub fn backward(&self, gy: Data) -> Data {
-        unimplemented!()
+    pub fn backward(&self, gy: Data) -> (Data, Data) {
+        let mut gys = self.inner.borrow_mut().backward(vec![gy]);
+        (gys.pop().unwrap(), gys.pop().unwrap())
     }
     fn forward_body(xs: Vec<Data>) -> Vec<Data> {
         let x0 = &xs[0];
@@ -216,8 +217,9 @@ impl Add {
         let y = x0 + x1;
         vec!(y)
     }
-    fn backward_body(x: Vec<Data>, gy: Vec<Data>) -> Vec<Data> {
-        unimplemented!()
+    fn backward_body(_x: Vec<Data>, gy: Vec<Data>) -> Vec<Data> {
+        let gy = &gy[0];
+        vec![gy.clone() , gy.clone()]
     }
 }
 impl FnOnce<(Vec<&Variable>,)> for Add {

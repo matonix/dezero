@@ -33,9 +33,13 @@ fn test_numerical_diff() {
 }
 
 fn test_add() {
-    let x0 = Variable::new(arr0(2.));
-    let x1 = Variable::new(arr0(3.));
-    let y = add(&x0, &x1);
+    let x = Variable::new(arr0(2.));
+    let y = Variable::new(arr0(3.));
+    let z = add(&square(&x), &square(&y));
+
+    z.backward();
+    println!("z = {:?}", z.get_data().view().into_scalar());
+    println!("x = {:?}", x.get_data().view().into_scalar());
     println!("y = {:?}", y.get_data().view().into_scalar());
 }
 
