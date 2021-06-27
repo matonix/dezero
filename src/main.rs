@@ -39,8 +39,8 @@ fn test_add() {
 
     z.backward();
     println!("z = {:?}", z.get_data().view().into_scalar());
-    println!("x = {:?}", x.get_data().view().into_scalar());
-    println!("y = {:?}", y.get_data().view().into_scalar());
+    println!("x = {:?}", x.get_grad().unwrap().view().into_scalar());
+    println!("y = {:?}", y.get_grad().unwrap().view().into_scalar());
 }
 
 #[cfg(test)]
