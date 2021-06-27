@@ -1,15 +1,9 @@
-// Struct を callable にするには nightly の機能が必要 (Fn trait)
-// https://stackoverflow.com/questions/42859330/how-do-i-make-a-struct-callable
-#![feature(unboxed_closures)]
-#![feature(fn_traits)]
-
+use ndarray::prelude::*;
 // 構造は本質的に doubly linked list なので、ノードの格納は Rc<RefCell<...>> に
 // https://blog.ymgyt.io/entry/2019/08/17/013313
 // https://gist.github.com/matey-jack/3e19b6370c6f7036a9119b79a82098ca
-use ndarray::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
-// use std::fmt;
 
 pub type Data = Array0<f64>;
 
@@ -38,7 +32,11 @@ impl VariableCell {
                     .collect::<Vec<_>>();
                 let gxs = f.borrow().backward(gys);
                 for (x, gx) in f.borrow().inputs.iter().zip(gxs) {
-                    x.borrow_mut().grad = Some(gx);
+                    let gx_ = match &x.borrow().grad {
+                        Some(v) => Some(v + gx),
+                        None => Some(gx)
+                    };
+                    x.borrow_mut().grad = gx_;
                     x.borrow()
                         .creator
                         .as_ref()
@@ -70,6 +68,9 @@ impl Variable {
     pub fn backward(&self) {
         self.set_grad(Array::ones(self.get_data().raw_dim()));
         self.inner.borrow().backward()
+    }
+    pub fn clear_grad(&self) {
+        self.inner.borrow_mut().grad = None;
     }
 }
 
@@ -125,6 +126,7 @@ impl FunctionCell {
         (self.backward)(xs, gys)
     }
 }
+
 pub struct Square {
     inner: Rc<RefCell<FunctionCell>>,
 }
@@ -147,18 +149,6 @@ impl Square {
     }
     fn backward_body(x: Vec<Data>, gy: Vec<Data>) -> Vec<Data> {
         vec![2.0 * &x[0] * &gy[0]]
-    }
-}
-impl FnOnce<(&Variable,)> for Square {
-    type Output = Variable;
-    extern "rust-call" fn call_once(self, _args: (&Variable,)) -> Variable {
-        panic!("Square cannot be called as FnOnce")
-    }
-}
-impl FnMut<(&Variable,)> for Square {
-    // type Output = Variable
-    extern "rust-call" fn call_mut(&mut self, args: (&Variable,)) -> Variable {
-        self.call(&args.0)
     }
 }
 pub fn square(x: &Variable) -> Variable {
@@ -190,18 +180,6 @@ impl Exp {
         vec![x[0].mapv(f64::exp) * &gy[0]]
     }
 }
-impl FnOnce<(&Variable,)> for Exp {
-    type Output = Variable;
-    extern "rust-call" fn call_once(self, _args: (&Variable,)) -> Variable {
-        panic!("Exp cannot be called as FnOnce")
-    }
-}
-impl FnMut<(&Variable,)> for Exp {
-    // type Output = Variable
-    extern "rust-call" fn call_mut(&mut self, args: (&Variable,)) -> Variable {
-        self.call(&args.0)
-    }
-}
 pub fn exp(x: &Variable) -> Variable {
     let f = Exp::new();
     f.call(x)
@@ -216,10 +194,10 @@ impl Add {
             inner: Rc::new(RefCell::new(FunctionCell::new(Self::backward_body))),
         }
     }
-    pub fn call(&self, inputs: Vec<&Variable>) -> Variable {
+    pub fn call(&self, x: &Variable, y: &Variable) -> Variable {
         self.inner
             .borrow_mut()
-            .cons(inputs, Rc::clone(&self.inner), Self::forward_body).pop().unwrap()
+            .cons(vec![x, y], Rc::clone(&self.inner), Self::forward_body).pop().unwrap()
     }
     pub fn backward(&self, gy: Data) -> (Data, Data) {
         let mut gys = self.inner.borrow_mut().backward(vec![gy]);
@@ -236,21 +214,9 @@ impl Add {
         vec![gy.clone() , gy.clone()]
     }
 }
-impl FnOnce<(Vec<&Variable>,)> for Add {
-    type Output = Variable;
-    extern "rust-call" fn call_once(self, _args: (Vec<&Variable>,)) -> Variable {
-        panic!("Exp cannot be called as FnOnce")
-    }
-}
-impl FnMut<(Vec<&Variable>,)> for Add {
-    // type Output = Variable
-    extern "rust-call" fn call_mut(&mut self, args: (Vec<&Variable>,)) -> Variable {
-        self.call(args.0)
-    }
-}
 pub fn add(x: &Variable, y: &Variable) -> Variable {
     let f = Add::new();
-    f.call(vec![x, y])
+    f.call(x, y)
 }
 
 pub fn numerical_diff(f: fn(&Variable) -> Variable, x: Variable, eps: Option<Data>) -> Data {

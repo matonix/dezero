@@ -2,13 +2,10 @@ use dezero::*;
 use ndarray::prelude::*;
 
 fn main() {
-    test_numerical_diff();
-    test_forward_prop();
-    test_back_prop();
-    test_add();
+    test_add_twice();
 }
 
-fn test_forward_prop() {
+pub fn test_forward_prop() {
     let x = Variable::new(arr0(0.5));
     let a = square(&x);
     let b = exp(&a);
@@ -16,7 +13,7 @@ fn test_forward_prop() {
     println!("y = {:?}", y.get_data().view().into_scalar());
 }
 
-fn test_back_prop() {
+pub fn test_back_prop() {
     let x = Variable::new(arr0(0.5));
     let a = square(&x);
     let b = exp(&a);
@@ -25,22 +22,34 @@ fn test_back_prop() {
     println!("x.grad = {:?}", x.get_grad().unwrap().view().into_scalar());
 }
 
-fn test_numerical_diff() {
+pub fn test_numerical_diff() {
     let f = square;
     let x = Variable::new(arr0(2.0));
     let dy = numerical_diff(f, x, None);
     println!("dy = {:?}", dy.view().into_scalar());
 }
 
-fn test_add() {
-    let x = Variable::new(arr0(2.));
-    let y = Variable::new(arr0(3.));
+pub fn test_add() {
+    let x = Variable::new(arr0(2.0));
+    let y = Variable::new(arr0(3.0));
     let z = add(&square(&x), &square(&y));
 
     z.backward();
     println!("z = {:?}", z.get_data().view().into_scalar());
-    println!("x = {:?}", x.get_grad().unwrap().view().into_scalar());
-    println!("y = {:?}", y.get_grad().unwrap().view().into_scalar());
+    println!("x.grad = {:?}", x.get_grad().unwrap().view().into_scalar());
+    println!("y.grad = {:?}", y.get_grad().unwrap().view().into_scalar());
+}
+
+pub fn test_add_twice() {
+    let x = Variable::new(arr0(3.0));
+    let y = add(&x, &x);
+    y.backward();
+    println!("x.grad = {:?}", x.get_grad().unwrap().view().into_scalar()); // 2.0
+
+    x.clear_grad();
+    let y = add(&x, &add(&x, &x));
+    y.backward();
+    println!("x.grad = {:?}", x.get_grad().unwrap().view().into_scalar()); // 3.0
 }
 
 #[cfg(test)]
