@@ -7,6 +7,16 @@ use std::rc::Rc;
 
 pub type Data = Array0<f64>;
 
+enum ForwardFn {
+    OneOne(fn (&Data) -> Data),
+    TwoOne(fn (&Data, &Data) -> Data),
+}
+
+enum BackwardFn {
+    OneOneOne(fn (&Data, &Data) -> Data),
+    OneOneTwo(fn (&Data, &Data) -> [Data; 2]),
+}
+
 struct VariableCell {
     data: Data,
     grad: Option<Data>,
@@ -79,10 +89,10 @@ impl Variable {
 struct FunctionCell {
     inputs: Vec<Rc<RefCell<VariableCell>>>,
     outputs: Vec<Rc<RefCell<VariableCell>>>,
-    backward: fn(Vec<Data>, Vec<Data>) -> Vec<Data>,
+    backward: BackwardFn,
 }
 impl FunctionCell {
-    fn new(backward: fn(Vec<Data>, Vec<Data>) -> Vec<Data>) -> Self {
+    fn new(backward: BackwardFn) -> Self {
         Self {
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -93,13 +103,16 @@ impl FunctionCell {
         &mut self,
         inputs: Vec<&Variable>,
         func: Rc<RefCell<FunctionCell>>,
-        forward: fn(Vec<Data>) -> Vec<Data>,
+        forward: ForwardFn,
     ) -> Vec<Variable> {
         let xs = inputs
             .iter()
             .map(|input| input.get_data())
             .collect::<Vec<_>>();
-        let ys = forward(xs);
+        let ys = match forward {
+            ForwardFn::OneOne(f) => vec![f(&xs[0])],
+            ForwardFn::TwoOne(f) => vec![f(&xs[0], &xs[1])],
+        };
         let outputs = ys
             .iter()
             .map(|y| Variable::new(y.clone()))
@@ -123,7 +136,10 @@ impl FunctionCell {
             .iter()
             .map(|input| input.as_ref().borrow().data.clone())
             .collect::<Vec<_>>();
-        (self.backward)(xs, gys)
+        match self.backward {
+            BackwardFn::OneOneOne(f) => vec![f(&xs[0], &gys[0])],
+            BackwardFn::OneOneTwo(f) => f(&xs[0], &gys[0]).iter().map(|x| x.clone()).collect::<Vec<_>>(),
+        }
     }
 }
 
@@ -133,22 +149,24 @@ pub struct Square {
 impl Square {
     pub fn new() -> Self {
         Square {
-            inner: Rc::new(RefCell::new(FunctionCell::new(Self::backward_body))),
+            inner: Rc::new(RefCell::new(FunctionCell::new(BackwardFn::OneOneOne(Self::backward_body)))),
         }
     }
     pub fn call(&self, input: &Variable) -> Variable {
         self.inner
             .borrow_mut()
-            .cons(vec![input], Rc::clone(&self.inner), Self::forward_body).pop().unwrap()
+            .cons(vec![input], Rc::clone(&self.inner), ForwardFn::OneOne(Self::forward_body))
+            .pop()
+            .unwrap()
     }
     pub fn backward(&self, gy: Data) -> Data {
         self.inner.borrow_mut().backward(vec![gy]).pop().unwrap()
     }
-    fn forward_body(x: Vec<Data>) -> Vec<Data> {
-        vec![x[0].map(|v| v * v)]
+    fn forward_body(x: &Data) -> Data {
+        x * x
     }
-    fn backward_body(x: Vec<Data>, gy: Vec<Data>) -> Vec<Data> {
-        vec![2.0 * &x[0] * &gy[0]]
+    fn backward_body(x: &Data, gy: &Data) -> Data {
+        2.0 * x * gy
     }
 }
 pub fn square(x: &Variable) -> Variable {
@@ -162,22 +180,24 @@ pub struct Exp {
 impl Exp {
     pub fn new() -> Self {
         Exp {
-            inner: Rc::new(RefCell::new(FunctionCell::new(Self::backward_body))),
+            inner: Rc::new(RefCell::new(FunctionCell::new(BackwardFn::OneOneOne(Self::backward_body)))),
         }
     }
     pub fn call(&self, input: &Variable) -> Variable {
         self.inner
             .borrow_mut()
-            .cons(vec![input], Rc::clone(&self.inner), Self::forward_body).pop().unwrap()
+            .cons(vec![input], Rc::clone(&self.inner), ForwardFn::OneOne(Self::forward_body))
+            .pop()
+            .unwrap()
     }
     pub fn backward(&self, gy: Data) -> Data {
         self.inner.borrow_mut().backward(vec![gy]).pop().unwrap()
     }
-    fn forward_body(x: Vec<Data>) -> Vec<Data> {
-        vec![x[0].mapv(f64::exp)]
+    fn forward_body(x: &Data) -> Data {
+        x.mapv(f64::exp)
     }
-    fn backward_body(x: Vec<Data>, gy: Vec<Data>) -> Vec<Data> {
-        vec![x[0].mapv(f64::exp) * &gy[0]]
+    fn backward_body(x: &Data, gy: &Data) -> Data {
+        x.mapv(f64::exp) * gy
     }
 }
 pub fn exp(x: &Variable) -> Variable {
@@ -191,27 +211,25 @@ pub struct Add {
 impl Add {
     pub fn new() -> Self {
         Add {
-            inner: Rc::new(RefCell::new(FunctionCell::new(Self::backward_body))),
+            inner: Rc::new(RefCell::new(FunctionCell::new(BackwardFn::OneOneTwo(Self::backward_body)))),
         }
     }
     pub fn call(&self, x: &Variable, y: &Variable) -> Variable {
         self.inner
             .borrow_mut()
-            .cons(vec![x, y], Rc::clone(&self.inner), Self::forward_body).pop().unwrap()
+            .cons(vec![x, y], Rc::clone(&self.inner), ForwardFn::TwoOne(Self::forward_body))
+            .pop()
+            .unwrap()
     }
     pub fn backward(&self, gy: Data) -> (Data, Data) {
         let mut gys = self.inner.borrow_mut().backward(vec![gy]);
         (gys.pop().unwrap(), gys.pop().unwrap())
     }
-    fn forward_body(xs: Vec<Data>) -> Vec<Data> {
-        let x0 = &xs[0];
-        let x1 = &xs[1];
-        let y = x0 + x1;
-        vec!(y)
+    fn forward_body(x: &Data, y: &Data) -> Data {
+        x + y
     }
-    fn backward_body(_x: Vec<Data>, gy: Vec<Data>) -> Vec<Data> {
-        let gy = &gy[0];
-        vec![gy.clone() , gy.clone()]
+    fn backward_body(_x: &Data, gy: &Data) -> [Data; 2] {
+        [gy.clone(), gy.clone()]
     }
 }
 pub fn add(x: &Variable, y: &Variable) -> Variable {
