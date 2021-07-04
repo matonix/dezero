@@ -4,6 +4,7 @@ use ndarray::prelude::*;
 // https://gist.github.com/matey-jack/3e19b6370c6f7036a9119b79a82098ca
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::fmt;
 
 pub type Data = Array0<f64>;
 
@@ -244,4 +245,34 @@ pub fn numerical_diff(f: fn(&Variable) -> Variable, x: Variable, eps: Option<Dat
     let y0 = f(&x0);
     let y1 = f(&x1);
     (y1.get_data() - y0.get_data()) / (2.0 * e)
+}
+
+impl fmt::Display for VariableCell {
+    fn fmt(&self, w: &mut fmt::Formatter) -> fmt::Result {
+        match &self.creator {
+            Some(creator) => write!(w, "{}", creator.borrow())?,
+            None => write!(w, "")?,
+        }
+        write!(w, "\nVar [ data = {}, grad = ", self.data)?;
+        match &self.grad {
+            Some(grad) => write!(w, "{}", grad)?,
+            None => write!(w, "None")?,
+        }
+        write!(w, " ]")
+    }
+}
+
+impl fmt::Display for FunctionCell {
+    fn fmt(&self, w: &mut fmt::Formatter) -> fmt::Result {
+        for input in &self.inputs {
+            write!(w, "{}", input.borrow())?;
+        }
+        write!(w, "\nFun [ ]")
+    }
+}
+
+impl fmt::Display for Variable {
+    fn fmt(&self, w: &mut fmt::Formatter) -> fmt::Result {
+        write!(w, "{}", &self.inner.borrow())
+    }
 }

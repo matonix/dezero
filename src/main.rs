@@ -2,6 +2,7 @@ use dezero::*;
 use ndarray::prelude::*;
 
 fn main() {
+    test_back_prop();
     test_add_twice();
 }
 
@@ -20,6 +21,7 @@ pub fn test_back_prop() {
     let y = square(&b);
     y.backward();
     println!("x.grad = {:?}", x.get_grad().unwrap().view().into_scalar());
+    println!("Network = {}", y);
 }
 
 pub fn test_numerical_diff() {
