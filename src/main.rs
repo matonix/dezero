@@ -2,8 +2,7 @@ use dezero::*;
 use ndarray::prelude::*;
 
 fn main() {
-    test_back_prop();
-    test_add_twice();
+    test_square_add();
 }
 
 pub fn test_forward_prop() {
@@ -21,7 +20,6 @@ pub fn test_back_prop() {
     let y = square(&b);
     y.backward();
     println!("x.grad = {:?}", x.get_grad().unwrap().view().into_scalar());
-    println!("Network = {}", y);
 }
 
 pub fn test_numerical_diff() {
@@ -52,6 +50,16 @@ pub fn test_add_twice() {
     let y = add(&x, &add(&x, &x));
     y.backward();
     println!("x.grad = {:?}", x.get_grad().unwrap().view().into_scalar()); // 3.0
+}
+
+pub fn test_square_add() {
+    let x = Variable::new(arr0(2.0));
+    let a = square(&x);
+    let y = add(&square(&a), &square(&a));
+    y.backward();
+    // println!("Network = {}", y);
+    println!("y.data = {:?}", y.get_data().view().into_scalar()); // 32.0
+    println!("x.grad = {:?}", x.get_grad().unwrap().view().into_scalar()); // 64.0
 }
 
 #[cfg(test)]

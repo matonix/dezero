@@ -5,6 +5,11 @@ use ndarray::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::fmt;
+use std::collections::HashSet;
+use std::cmp::Ordering;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+use std::hash::{Hash, Hasher};
 
 pub type Data = Array0<f64>;
 
@@ -18,10 +23,55 @@ enum BackwardFn {
     OneOneTwo(fn (&Data, &Data) -> [Data; 2]),
 }
 
+#[derive(Clone)]
+struct Candidate {
+    priority: Reverse<usize>,
+    id: usize,
+    func: Rc<RefCell<FunctionCell>>,
+}
+
+impl Candidate {
+    fn new(func: &Rc<RefCell<FunctionCell>>) -> Candidate {
+        Candidate {
+            priority : Reverse(func.borrow().generation), // max-heap
+            id : func.borrow().object_id,
+            func : Rc::clone(func),
+        }
+    }
+}
+
+impl PartialEq for Candidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority == other.priority && self.id == other.id
+    }
+}
+
+impl Eq for Candidate {}
+
+impl Hash for Candidate {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.priority.cmp(&self.priority)
+    }
+}
+
+impl PartialOrd for Candidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 struct VariableCell {
     data: Data,
     grad: Option<Data>,
     creator: Option<Rc<RefCell<FunctionCell>>>,
+    generation: usize,
+    object_id: usize,
 }
 impl VariableCell {
     fn new(data: Data) -> VariableCell {
@@ -29,32 +79,47 @@ impl VariableCell {
             data: data,
             grad: None,
             creator: None,
+            generation: 0,
+            object_id: 0,
         }
     }
     fn backward(&self) {
         if let Some(creator) = &self.creator {
-            let mut funcs = vec![Rc::clone(creator)];
-            while let Some(f) = funcs.pop() {
-                let gys = f
+            let mut funcs = BinaryHeap::<Candidate>::new();
+            let mut seen_set = HashSet::new();
+            fn add_func(f: &Rc<RefCell<FunctionCell>>, funcs: &mut BinaryHeap<Candidate>, seen_set: &mut HashSet<Candidate>) {
+                let candidate = Candidate::new(&f);
+                if !seen_set.contains(&candidate) {
+                    seen_set.insert(candidate.clone());
+                    funcs.push(candidate);
+                }
+            }
+            add_func(creator, &mut funcs, &mut seen_set);
+            while let Some(candidate) = funcs.pop() {
+                let func = candidate.func;
+                let gys = func
                     .borrow()
                     .outputs
                     .iter()
                     .flat_map(|y| y.borrow().grad.clone())
                     .collect::<Vec<_>>();
-                let gxs = f.borrow().backward(gys);
-                for (x, gx) in f.borrow().inputs.iter().zip(gxs) {
-                    let gx_ = match &x.borrow().grad {
+                let gxs = func.borrow().backward(gys);
+                for (x, gx) in func.borrow().inputs.iter().zip(gxs) {
+                    let gx_new = match &x.borrow().grad {
                         Some(v) => Some(v + gx),
-                        None => Some(gx)
+                        None => Some(gx),
                     };
-                    x.borrow_mut().grad = gx_;
-                    x.borrow()
-                        .creator
-                        .as_ref()
-                        .map(|c| funcs.push(Rc::clone(c)));
+                    x.borrow_mut().grad = gx_new;
+                    if let Some(creator) = &x.borrow().creator {
+                        add_func(creator, &mut funcs, &mut seen_set);
+                    }
                 }
             }
         }
+    }
+    fn set_creator(&mut self, func_ref: &Rc<RefCell<FunctionCell>>, generation: usize) {
+        self.generation = generation + 1;
+        self.creator = Some(Rc::clone(func_ref));
     }
 }
 
@@ -63,9 +128,14 @@ pub struct Variable {
 }
 impl Variable {
     pub fn new(data: Data) -> Variable {
-        Variable {
+        let v = Variable {
             inner: Rc::new(RefCell::new(VariableCell::new(data))),
-        }
+        };
+        // ポインタの値を object_id として扱う
+        // https://users.rust-lang.org/t/object-identity/18402/11
+        let v_ptr = Rc::into_raw(Rc::clone(&v.inner)) as *const _ as usize;
+        v.inner.borrow_mut().object_id = v_ptr;
+        v
     }
     pub fn get_data(&self) -> Data {
         self.inner.borrow().data.clone()
@@ -91,6 +161,8 @@ struct FunctionCell {
     inputs: Vec<Rc<RefCell<VariableCell>>>,
     outputs: Vec<Rc<RefCell<VariableCell>>>,
     backward: BackwardFn,
+    generation: usize,
+    object_id: usize,
 }
 impl FunctionCell {
     fn new(backward: BackwardFn) -> Self {
@@ -98,12 +170,14 @@ impl FunctionCell {
             inputs: Vec::new(),
             outputs: Vec::new(),
             backward: backward,
+            generation: 0,
+            object_id: 0,
         }
     }
     fn cons(
         &mut self,
         inputs: Vec<&Variable>,
-        func: Rc<RefCell<FunctionCell>>,
+        func_ref: &Rc<RefCell<FunctionCell>>,
         forward: ForwardFn,
     ) -> Vec<Variable> {
         let xs = inputs
@@ -118,9 +192,14 @@ impl FunctionCell {
             .iter()
             .map(|y| Variable::new(y.clone()))
             .collect::<Vec<_>>();
+        self.generation = inputs
+            .iter()
+            .map(|input| input.inner.borrow().generation)
+            .max()
+            .expect("generation");
         outputs
             .iter()
-            .for_each(|output| output.inner.borrow_mut().creator = Some(Rc::clone(&func)));
+            .for_each(|output| output.inner.borrow_mut().set_creator(func_ref, self.generation));
         self.inputs = inputs
             .iter()
             .map(|input| Rc::clone(&input.inner))
@@ -135,7 +214,7 @@ impl FunctionCell {
         let xs = self
             .inputs
             .iter()
-            .map(|input| input.as_ref().borrow().data.clone())
+            .map(|input| input.borrow().data.clone())
             .collect::<Vec<_>>();
         match self.backward {
             BackwardFn::OneOneOne(f) => vec![f(&xs[0], &gys[0])],
@@ -149,19 +228,24 @@ pub struct Square {
 }
 impl Square {
     pub fn new() -> Self {
-        Square {
+        let f = Square {
             inner: Rc::new(RefCell::new(FunctionCell::new(BackwardFn::OneOneOne(Self::backward_body)))),
-        }
+        };
+        // ポインタの値を object_id として扱う
+        // https://users.rust-lang.org/t/object-identity/18402/11
+        let f_ptr = Rc::into_raw(Rc::clone(&f.inner)) as *const _ as usize;
+        f.inner.borrow_mut().object_id = f_ptr;
+        f
     }
     pub fn call(&self, input: &Variable) -> Variable {
         self.inner
             .borrow_mut()
-            .cons(vec![input], Rc::clone(&self.inner), ForwardFn::OneOne(Self::forward_body))
+            .cons(vec![input], &self.inner, ForwardFn::OneOne(Self::forward_body))
             .pop()
             .unwrap()
     }
     pub fn backward(&self, gy: Data) -> Data {
-        self.inner.borrow_mut().backward(vec![gy]).pop().unwrap()
+        self.inner.borrow().backward(vec![gy]).pop().unwrap()
     }
     fn forward_body(x: &Data) -> Data {
         x * x
@@ -180,19 +264,24 @@ pub struct Exp {
 }
 impl Exp {
     pub fn new() -> Self {
-        Exp {
+        let f = Exp {
             inner: Rc::new(RefCell::new(FunctionCell::new(BackwardFn::OneOneOne(Self::backward_body)))),
-        }
+        };
+        // ポインタの値を object_id として扱う
+        // https://users.rust-lang.org/t/object-identity/18402/11
+        let f_ptr = Rc::into_raw(Rc::clone(&f.inner)) as *const _ as usize;
+        f.inner.borrow_mut().object_id = f_ptr;
+        f
     }
     pub fn call(&self, input: &Variable) -> Variable {
         self.inner
             .borrow_mut()
-            .cons(vec![input], Rc::clone(&self.inner), ForwardFn::OneOne(Self::forward_body))
+            .cons(vec![input], &self.inner, ForwardFn::OneOne(Self::forward_body))
             .pop()
             .unwrap()
     }
     pub fn backward(&self, gy: Data) -> Data {
-        self.inner.borrow_mut().backward(vec![gy]).pop().unwrap()
+        self.inner.borrow().backward(vec![gy]).pop().unwrap()
     }
     fn forward_body(x: &Data) -> Data {
         x.mapv(f64::exp)
@@ -211,19 +300,24 @@ pub struct Add {
 }
 impl Add {
     pub fn new() -> Self {
-        Add {
+        let f = Add {
             inner: Rc::new(RefCell::new(FunctionCell::new(BackwardFn::OneOneTwo(Self::backward_body)))),
-        }
+        };
+        // ポインタの値を object_id として扱う
+        // https://users.rust-lang.org/t/object-identity/18402/11
+        let f_ptr = Rc::into_raw(Rc::clone(&f.inner)) as *const _ as usize;
+        f.inner.borrow_mut().object_id = f_ptr;
+        f
     }
     pub fn call(&self, x: &Variable, y: &Variable) -> Variable {
         self.inner
             .borrow_mut()
-            .cons(vec![x, y], Rc::clone(&self.inner), ForwardFn::TwoOne(Self::forward_body))
+            .cons(vec![x, y], &self.inner, ForwardFn::TwoOne(Self::forward_body))
             .pop()
             .unwrap()
     }
     pub fn backward(&self, gy: Data) -> (Data, Data) {
-        let mut gys = self.inner.borrow_mut().backward(vec![gy]);
+        let mut gys = self.inner.borrow().backward(vec![gy]);
         (gys.pop().unwrap(), gys.pop().unwrap())
     }
     fn forward_body(x: &Data, y: &Data) -> Data {
@@ -258,7 +352,7 @@ impl fmt::Display for VariableCell {
             Some(grad) => write!(w, "{}", grad)?,
             None => write!(w, "None")?,
         }
-        write!(w, " ]")
+        write!(w, ", generation = {}, object_id = {} ]", self.generation, self.object_id)
     }
 }
 
@@ -267,7 +361,7 @@ impl fmt::Display for FunctionCell {
         for input in &self.inputs {
             write!(w, "{}", input.borrow())?;
         }
-        write!(w, "\nFun [ ]")
+        write!(w, "\nFun [ generation = {}, object_id = {} ]", self.generation, self.object_id)
     }
 }
 
