@@ -66,8 +66,8 @@ pub fn test_square_add() {
 mod square_test {
     use dezero::*;
     use ndarray::prelude::*;
-    use ndarray_rand::RandomExt;
     use ndarray_rand::rand_distr::Uniform;
+    use ndarray_rand::RandomExt;
 
     #[test]
     fn test_forward() {
